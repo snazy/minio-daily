@@ -75,7 +75,7 @@ See [Contributing to the project](CONTRIBUTING.md)
 ## Licensing
 
 This project is licensed under the [Apache License v2](./LICENSE) (SPDX: `Apache-2.0`).
-Code of the MinIO project is and will not be included in this repository.
+Code of the MinIO project is not and will not be included in this repository.
 
 MinIO and therefore the images published via this project are licensed under the
 [GNU Affero General Public License v3.0](https://www.gnu.org/licenses/agpl-3.0.html) (SPDX: `AGPL-3.0`).
