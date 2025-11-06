@@ -1,0 +1,57 @@
+{
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  extends: [
+    'config:recommended',
+    // Required to not pin dependencies to _exact_ versions (pip)
+    ':preserveSemverRanges',
+    'helpers:pinGitHubActionDigests',
+    ':semanticPrefixFixDepsChoreOthers',
+    ':dependencyDashboard',
+  ],
+  packageRules: [
+    {
+      matchManagers: [
+        'dockerfile',
+        'devcontainer',
+        'docker-compose',
+        'github-actions',
+      ],
+      // do not add any labels, because that conflicts with CI job restarts, causing the wrong CI run
+      // to be cancelled in GitHub actions when the `labeled` type is used in e.g. `on.pull_request.types`.
+      labels: [],
+    },
+
+    // Check for updates, merge automatically
+    {
+      matchManagers: [
+        'dockerfile',
+        'devcontainer',
+        'docker-compose',
+      ],
+      matchUpdateTypes: [
+        'minor',
+        'patch',
+      ],
+      automerge: true,
+      platformAutomerge: true,
+    },
+
+    {
+      matchManagers: [
+        'github-actions',
+      ],
+      matchUpdateTypes: [
+        'major',
+        'minor',
+        'patch',
+        'digest',
+      ],
+      automerge: true,
+      platformAutomerge: true,
+    },
+  ],
+
+  // Max 50 PRs in total, 10 per hour
+  prConcurrentLimit: 50,
+  prHourlyLimit: 10,
+}

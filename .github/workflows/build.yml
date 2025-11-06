@@ -1,0 +1,242 @@
+# Copyright (C) 2025 Robert Stupp
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# CI & Daily build+publishing for MinIO and mc
+
+name: Build
+
+on:
+  schedule:
+    - cron: '0 12 * * *'
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+
+  # Use version and commit from minio/minio + minio/mc consistently across all platform builds
+  version_and_tags:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    outputs:
+      daily_version: ${{ steps.gather_info.outputs.daily_version }}
+      minio_git_sha: ${{ steps.gather_info.outputs.minio_git_sha }}
+      mc_git_sha: ${{ steps.gather_info.outputs.mc_git_sha }}
+      console_git_sha: ${{ steps.gather_info.outputs.console_git_sha }}
+      minio_release: ${{ steps.gather_info.outputs.minio_release }}
+      mc_release: ${{ steps.gather_info.outputs.mc_release }}
+      console_release: ${{ steps.gather_info.outputs.console_release }}
+      needs_release: ${{ steps.gather_info.outputs.needs_release }}
+    steps:
+      - name: Generate Version & gather Gig commit SHAs
+        id: gather_info
+        run: |
+          daily_version="DAILY.$(date -u "+%Y-%m-%dT%H-%M-%SZ")"
+          minio_git_sha="$(gh api repos/minio/minio/branches/master | jq --raw-output --join-output ".commit.sha")"
+          mc_git_sha="$(gh api repos/minio/mc/branches/master | jq --raw-output --join-output ".commit.sha")"
+          console_git_sha="$(gh api repos/georgmangold/console/branches/main | jq --raw-output --join-output ".commit.sha")"
+          echo "daily_version=${daily_version}" >> $GITHUB_OUTPUT
+          echo "minio_git_sha=${minio_git_sha}" >> $GITHUB_OUTPUT
+          echo "mc_git_sha=${mc_git_sha}" >> $GITHUB_OUTPUT
+          echo "console_git_sha=${console_git_sha}" >> $GITHUB_OUTPUT
+
+          echo "# Values" >> $GITHUB_STEP_SUMMARY
+          echo "Daily version = \`${daily_version}\`" >> $GITHUB_STEP_SUMMARY
+          echo "Last commit on minio/minio = \`${minio_git_sha}\`" >> $GITHUB_STEP_SUMMARY
+          echo "Last commit on minio/mc = \`${mc_git_sha}\`" >> $GITHUB_STEP_SUMMARY
+          echo "Last commit on georgmangold/console = \`${console_git_sha}\`" >> $GITHUB_STEP_SUMMARY
+
+          minio_release="$(gh api repos/minio/minio/releases | jq -r '.[].tag_name | select(test("alpha|beta|rc") | not) ' | sort -rV | head -n 1 |sed 's/v//')"
+          mc_release="$(gh api repos/minio/mc/releases | jq -r '.[].tag_name | select(test("alpha|beta|rc") | not) ' | sort -rV | head -n 1 |sed 's/v//')"
+          console_release="$(gh api repos/georgmangold/console/releases | jq -r '.[].tag_name | select(test("alpha|beta|rc") | not) ' | sort -rV | head -n 1)"
+          echo "minio_release=${minio_release}" >> $GITHUB_OUTPUT
+          echo "mc_release=${mc_release}" >> $GITHUB_OUTPUT
+          echo "console_release=${console_release}" >> $GITHUB_OUTPUT
+
+          echo "Last Minio release: \`${minio_release}\`" >> $GITHUB_STEP_SUMMARY
+          echo "Last MC release: \`${mc_release}\`" >> $GITHUB_STEP_SUMMARY
+          echo "Last console release: \`${console_release}\`" >> $GITHUB_STEP_SUMMARY
+
+          last_built_release=""
+          last_built_release="$(gh api orgs/snazy/packages/container/minio-release/versions | \
+            jq --raw-output ".[0].metadata.container.tags.[]" | \
+            grep -w RELEASE)" || true
+          echo "Last built Minio release: \`${last_built_release}\`" >> $GITHUB_STEP_SUMMARY
+
+          [[ "${last_built_release}" != "${minio_release}" ]] && needs_release="true" || needs_release="false"
+          echo "needs_release=${needs_release}" >> $GITHUB_OUTPUT
+          echo "Build from release tag: \`${needs_release}\`" >> $GITHUB_STEP_SUMMARY
+
+  # Build MinIO + mc for all supported platforms.
+  # Upload the built binaries + LICENSE + NOTICE files as an artifact for the buildx job.
+  build_daily:
+    name: Daily MinIO + mc + console build for ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    needs:
+      - version_and_tags
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    env:
+      GOOS: linux
+      GOARCH: ${{ matrix.arch }}
+      minio_git_ref: ${{needs.version_and_tags.outputs.minio_git_sha}}
+      mc_git_ref: ${{needs.version_and_tags.outputs.mc_git_sha}}
+      console_git_ref: ${{needs.version_and_tags.outputs.console_git_ref}}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - name: Checkout MinIO
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: ${{ env.minio_git_ref }}
+          repository: 'minio/minio'
+          path: 'minio-source'
+      - name: Checkout mc
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: ${{ env.mc_git_ref }}
+          repository: 'minio/mc'
+          path: 'mc-source'
+      - name: Checkout console
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: ${{ env.console_git_ref }}
+          repository: 'georgmangold/console'
+          path: 'console-source'
+      - name: Build MinIO + mc + console
+        run: src/build-minio.sh
+      - name: Upload image
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: minio-daily-${{ env.GOOS }}-${{ env.GOARCH }}
+          path: ./build/image
+          retention-days: 1
+
+  # Collect the platform-specific images built in the build_daily job and build a multi-platform container image.
+  # If running on a push event, export the multiplatform image as an artifact for download.
+  # If running as a scheduled, or manually triggered job, the buildx output will be lost.
+  buildx_daily:
+    name: Daily multi-platform MinIO + mc + console image publishing
+    runs-on: ubuntu-latest
+    needs:
+      - version_and_tags
+      - build_daily
+    env:
+      # This is the argument to src/buildx.sh (either 'true' or 'false') whether to push the image to ghcr.io.
+      PUSH_OPT: ${{ github.event_name != 'push' && github.ref == 'refs/heads/main' }}
+      minio_version: ${{needs.version_and_tags.outputs.daily_version}}
+      minio_git_ref: ${{needs.version_and_tags.outputs.minio_git_sha}}
+      mc_git_ref: ${{needs.version_and_tags.outputs.mc_git_sha}}
+      console_git_ref: ${{needs.version_and_tags.outputs.console_git_sha}}
+      img_basename: minio-daily
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - name: Download images
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          path: ./build/image
+          merge-multiple: true
+          pattern: minio-daily-*
+      - name: Docker login
+        if: ${{ env.PUSH_OPT == 'true' }}
+        run: |
+          echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u $ --password-stdin
+      - name: Docker buildx
+        run: src/buildx.sh
+
+  build_release:
+    name: MinIO + mc + console release build for ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    needs:
+      - version_and_tags
+    if: ${{ needs.version_and_tags.outputs.needs_release == 'true' }}
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    env:
+      GOOS: linux
+      GOARCH: ${{ matrix.arch }}
+      minio_git_ref: ${{needs.version_and_tags.outputs.minio_release}}
+      mc_git_ref: ${{needs.version_and_tags.outputs.mc_release}}
+      console_git_ref: ${{needs.version_and_tags.outputs.console_release}}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - name: Checkout MinIO
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: ${{ env.minio_git_ref }}
+          repository: 'minio/minio'
+          path: 'minio-source'
+      - name: Checkout mc
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: ${{ env.mc_git_ref }}
+          repository: 'minio/mc'
+          path: 'mc-source'
+      - name: Checkout console
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: ${{ env.console_git_ref }}
+          repository: 'georgmangold/console'
+          path: 'console-source'
+      - name: Build MinIO + mc + console
+        run: src/build-minio.sh
+      - name: Upload image
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: minio-release-${{ env.GOOS }}-${{ env.GOARCH }}
+          path: ./build/image
+          retention-days: 1
+
+  # Collect the platform-specific images built in the build_daily job and build a multi-platform container image.
+  # If running on a push event, export the multiplatform image as an artifact for download.
+  # If running as a scheduled, or manually triggered job, the buildx output will be lost.
+  buildx_release:
+    name: Release multi-platform MinIO + mc + console image publishing
+    runs-on: ubuntu-latest
+    needs:
+      - version_and_tags
+      - build_release
+    if: ${{ needs.version_and_tags.outputs.needs_release == 'true' }}
+    env:
+      # This is the argument to src/buildx.sh (either 'true' or 'false') whether to push the image to ghcr.io.
+      PUSH_OPT: ${{ github.event_name != 'push' && github.ref == 'refs/heads/main' }}
+      minio_version: ${{needs.version_and_tags.outputs.minio_release}}
+      minio_release: ${{needs.version_and_tags.outputs.minio_release}}
+      mc_release: ${{needs.version_and_tags.outputs.mc_release}}
+      console_release: ${{needs.version_and_tags.outputs.console_release}}
+      minio_git_ref: ${{needs.version_and_tags.outputs.minio_release}}
+      mc_git_ref: ${{needs.version_and_tags.outputs.mc_release}}
+      console_git_ref: ${{needs.version_and_tags.outputs.console_release}}
+      img_basename: minio-release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - name: Download images
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          path: ./build/image
+          merge-multiple: true
+          pattern: minio-release-*
+      - name: Docker login
+        if: ${{ env.PUSH_OPT == 'true' }}
+        run: |
+          echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u $ --password-stdin
+      - name: Docker buildx
+        run: src/buildx.sh
