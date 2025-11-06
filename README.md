@@ -2,7 +2,8 @@
 
 # MinIO + mc + UI release and daily container publishing
 
-The MinIO container images containing MinIO, mc and
+The MinIO container images containing [MinIO](https://github.com/minio/minio),
+[`mc`](https://github.com/minio/mc) and
 [OpenMaxIO object browser](https://github.com/OpenMaxIO/openmaxio-object-browser/) UI are published to the
 GitHub Container Registry.
 
