@@ -72,7 +72,7 @@ jobs:
           echo "Last console release: \`${console_release}\`" >> $GITHUB_STEP_SUMMARY
 
           last_built_release=""
-          last_built_release="$(gh api orgs/snazy/packages/container/maxio-release/versions | \
+          last_built_release="$(gh api users/snazy/packages/container/maxio-release/versions | \
             jq --raw-output ".[0].metadata.container.tags.[]" | \
             grep -w RELEASE)" || true
           echo "Last built Minio release: \`${last_built_release}\`" >> $GITHUB_STEP_SUMMARY
