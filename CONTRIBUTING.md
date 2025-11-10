@@ -28,7 +28,3 @@ This helps avoid double work and allows the community to arrive at a consensus o
 Anyone can take part in the review process and once the community is happy and the build actions are passing,
 a Pull Request will be merged.
 Support must be unanimous for a change to be merged.
-
-### Reporting security issues
-
-Please see our [Security Policy](SECURITY.md)
