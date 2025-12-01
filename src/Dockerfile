@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM registry.access.redhat.com/ubi9-minimal:9.7-1763362218
+FROM registry.access.redhat.com/ubi9-minimal:9.7-1764578379
 
 # Luckily Docker's TARGETPLATFORM matches Go's GOOS/GOARCH :)
 # I.e.
